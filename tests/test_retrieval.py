@@ -22,6 +22,10 @@ def test_retrieve_returns_requested_number_of_hits():
 
 def test_retrieve_finds_relevant_passage():
     hits = retrieve("Is technical support available on weekends?", k=2)
-    # TODO T1: assert that one of the retrieved chunks actually contains the
-    # expected fact ("24/7"). Check the chunk's *text*, not its id.
-    assert ...
+    # T1: the question never says "24/7" and the policy never says "weekend",
+    # so this checks that retrieval matched on meaning. Asserting on the
+    # chunk's text rather than its id keeps the test valid if re-chunking
+    # renumbers the chunks.
+    assert any("24/7" in hit["text"] for hit in hits), (
+        f"retrieved {[hit['id'] for hit in hits]}, none of which mentions 24/7"
+    )

@@ -1,0 +1,29 @@
+{
+  "prompt_version": "v1",
+  "categories": {
+    "technical support": {
+      "passed": 1,
+      "total": 3
+    },
+    "out of scope": {
+      "passed": 6,
+      "total": 6
+    },
+    "returns": {
+      "passed": 3,
+      "total": 6
+    },
+    "delivery": {
+      "passed": 1,
+      "total": 3
+    },
+    "refund": {
+      "passed": 3,
+      "total": 3
+    },
+    "account": {
+      "passed": 1,
+      "total": 3
+    }
+  }
+}
