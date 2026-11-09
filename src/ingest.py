@@ -11,16 +11,23 @@ import hashlib
 from pathlib import Path
 
 import chromadb
+import pandas as pd
 from sentence_transformers import SentenceTransformer
 
-DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "lumabox_policies.txt"
-DB_PATH = Path(__file__).resolve().parent.parent / "chroma_db"
+ROOT = Path(__file__).resolve().parent.parent
+DATA_PATH = ROOT / "data" / "lumabox_policies.txt"
+PRICES_PATH = ROOT / "homework" / "model_prices.xlsx"
+DB_PATH = ROOT / "chroma_db"
 COLLECTION_NAME = "policies"
 
-# A short fingerprint of the source text. It changes whenever the documents
-# change, and every answer logs it, so a wrong answer can be traced back to
-# the exact knowledge it came from.
-KB_VERSION = hashlib.sha256(DATA_PATH.read_bytes()).hexdigest()[:12]
+# A short fingerprint of the source documents. It changes whenever the
+# knowledge changes, and every answer logs it, so a wrong answer can be traced
+# back to the exact knowledge it came from. The price table is hashed in too
+# (homework Exercise 1): a price change is a knowledge change, so it must be
+# visible in the traces exactly like a policy change.
+KB_VERSION = hashlib.sha256(
+    DATA_PATH.read_bytes() + PRICES_PATH.read_bytes()
+).hexdigest()[:12]
 
 # I1: the embedding model. Pinned by name so the index side (here) and the
 # query side (src/rag.py) always share one vector space; device="cpu" keeps the
@@ -43,8 +50,28 @@ def chunk_documents():
     return [chunk for chunk in raw_chunks if "\n" in chunk]
 
 
+def price_documents():
+    """One sentence per row of homework/model_prices.xlsx (Exercise 1).
+
+    A table cell is not a retrievable unit: the embedding model was trained on
+    sentences, and "4990" on its own carries no meaning to match a question
+    against. So each row becomes a sentence that contains both the way the
+    product is named and its price.
+
+    The model column is messy on purpose - serial code and product name run
+    together, e.g. "LMX-201 LumaBox X100" - and it is kept verbatim, so a
+    customer who quotes either one has something to match.
+    """
+    table = pd.read_excel(PRICES_PATH)
+    return [
+        f"The {str(row.model).strip()} costs {int(row.price)} THB."
+        for row in table.itertuples(index=False)
+    ]
+
+
 def build_index():
     chunks = chunk_documents()
+    prices = price_documents()
 
     # I3: a persistent client, so the index survives a restart. The old
     # collection is dropped first, which makes re-running ingest idempotent
@@ -65,9 +92,31 @@ def build_index():
     # pre-labelled documents.
     embeddings = embedding_model.encode(chunks, normalize_embeddings=True).tolist()
     ids = [f"chunk_{i}" for i in range(len(chunks))]
-    collection.add(ids=ids, documents=chunks, embeddings=embeddings)
+    collection.add(
+        ids=ids,
+        documents=chunks,
+        embeddings=embeddings,
+        metadatas=[{"source": "policy"}] * len(chunks),
+    )
 
-    print(f"Indexed {len(chunks)} chunks into {DB_PATH} (kb_version {KB_VERSION})")
+    # Exercise 1: the prices go into the SAME collection, tagged by source.
+    # One index means one retrieval path: no "does this look like a price
+    # question?" router deciding where to search, which would be a second
+    # place for the bot to be wrong and would have to be tested separately.
+    # The source metadata is for provenance and filtering, not routing.
+    price_embeddings = embedding_model.encode(prices, normalize_embeddings=True).tolist()
+    price_ids = [f"price_{i}" for i in range(len(prices))]
+    collection.add(
+        ids=price_ids,
+        documents=prices,
+        embeddings=price_embeddings,
+        metadatas=[{"source": "price"}] * len(prices),
+    )
+
+    print(
+        f"Indexed {len(chunks)} policy chunks and {len(prices)} price rows "
+        f"into {DB_PATH} (kb_version {KB_VERSION})"
+    )
 
 
 if __name__ == "__main__":

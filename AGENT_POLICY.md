@@ -19,6 +19,9 @@ nothing enforces or tests is a wish, not a policy.
 | P6 | **No invented facts.** Never state a price, date or number that isn't in the retrieved text. | Prompt only (weak). | Golden row `out_of_scope_tricky` · gate |
 | P7 | **Transparency.** Every answer shows which chunks it came from. | `src/main.py` and `app.py` print the sources. | Manual |
 | P8 | **Privacy.** Never ask for passwords or payment details. Conversation logs never enter version control. | Prompt and documents contain no such request · `logs/` is in `.gitignore`. | Manual review |
+| P9 | **Prices come from the table, never from the model.** The bot may state a price only when that price is in `homework/model_prices.xlsx` and the matching sentence was retrieved into the context. | Knowledge: `price_documents()` in `src/ingest.py` indexes one sentence per row into the same collection as the policies, so a price can only reach the answer by being retrieved · Prompt: "Use only the context below" (P5) | Golden `price` rows with the exact figure in `must_include` · gate category `price` |
+| P10 | **Unknown products get no price.** For a product that is not in the price table, the bot must not answer with a price. | Prompt only (weak), as for P6: a question about an unlisted model still retrieves a *real* price sentence, so `should_refuse()` cannot catch it. | Golden row `out_of_scope_tricky` ("How much is the LumaBox X999?") · gate category `out of scope` |
+| P11 | **Prices are indicative, not a quote.** The bot never states stock, discounts, promotions, instalments or a total including shipping or tax — only the listed price of a listed product. | No such data is in the index, so nothing can be retrieved to support it · P5 then applies | Golden `refuse` rows for instalments and discounts |
 
 ## Known gaps
 
@@ -28,6 +31,21 @@ nothing enforces or tests is a wish, not a policy.
   prompt change can remove that instruction (Module 2, Task 2 shows what happens).
   Tracked as a `known_issue` in `tests/golden.xlsx`.
 - **P4 has no automated test yet.**
+- **P10 is the price-shaped version of P6, and it is weaker.** Before the
+  price table was indexed, "How much is the LumaBox X999?" retrieved the
+  Returns policy and the model had nothing numeric to copy. Now it retrieves
+  a *real* price sentence for a *different* product at a similarity of 0.72,
+  so the refusal threshold is useless here and only the model's own "I do not
+  know" stands between the customer and a wrong price. It currently declines,
+  which is the right answer for the wrong reason: nothing enforces it. A real
+  fix is to check the model name in the question against the table before
+  answering, and refuse when there is no exact match.
+- **Serial codes are not understood.** "How much does model LMX-201 cost?"
+  retrieves `price_1` (LMX-202, the X200), not `price_0`. To an embedding
+  model, two serial codes that differ by one digit are nearly identical, and
+  the codes carry no meaning to begin with. The bot currently declines rather
+  than quoting the sibling's price, but that is luck, not enforcement; the
+  fix is lexical (exact/keyword) matching alongside the vector search.
 
 ## Changing this policy
 
