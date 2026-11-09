@@ -8,6 +8,12 @@ Case 3, in-store return: visit the store between 8:00 and 17:00.
 Delivery
 If a parcel is lost, contact the courier's support first, since delivery is outsourced. If you can't reach them, contact LumaBox technical support instead.
 
+Exchanges
+LumaBox does not offer exchanges. To change to a different model, return the original item under the returns policy and place a new order; the refund and the new order are handled separately.
+
+Order Tracking
+To track an order, open My Orders on the LumaBox website and use the tracking number shown there. LumaBox technical support cannot locate a parcel without that tracking number.
+
 Refund
 LumaBox refunds are processed within 8 business days after the returned product passes inspection.
 
