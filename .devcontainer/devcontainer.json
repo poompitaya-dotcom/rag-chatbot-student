@@ -1,0 +1,6 @@
+{
+  "name": "rag-chatbot",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "postCreateCommand": "pip install -r requirements.txt && python setup_check.py",
+  "forwardPorts": [8501]
+}

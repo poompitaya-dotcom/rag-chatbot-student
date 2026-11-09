@@ -1,0 +1,80 @@
+# Example CI/CD pipeline (GitHub Actions), read in Module 4.
+# It runs on GitHub's machines every time someone pushes or opens a pull
+# request. Three jobs run in order; if one fails, the next never starts.
+#
+#   test   -> unit + golden tests, then the quality gate     (CI)
+#   build  -> package the app into a container image         (CI)
+#   deploy -> ship that image to production, main only      (CD)
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests and quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      # Reuse downloaded model weights between runs instead of fetching 1 GB each time.
+      - name: Cache model weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-${{ hashFiles('src/rag.py') }}
+
+      - name: Build the knowledge base
+        run: python -m src.ingest
+
+      # Deterministic checks: retrieval and the policy decision. Must be 100%.
+      - name: Unit and golden tests
+        run: pytest
+
+      # Generated answers vs the committed baseline (tests/gate_baseline.json).
+      # Exits with an error if any category got worse, which fails the job.
+      - name: Quality gate
+        run: python -m src.gate
+
+  build:
+    name: Build container image
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tag the image with the commit id, so every image traces back to its exact code.
+      - name: Build image
+        run: docker build -t lumabox-bot:${{ github.sha }} .
+
+      # A real pipeline would now push the image to a registry, for example:
+      #   docker push ghcr.io/<owner>/lumabox-bot:${{ github.sha }}
+
+  deploy:
+    name: Deploy to production
+    needs: build
+    # Only changes merged into main are shipped; pull requests stop after build.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # A protected environment: repository settings can require a person to approve.
+    environment: production
+    steps:
+      - name: Deploy
+        run: |
+          echo "Placeholder. A real pipeline would roll out lumabox-bot:${{ github.sha }} here,"
+          echo "usually to staging first, then gradually to production, with a way to roll back."

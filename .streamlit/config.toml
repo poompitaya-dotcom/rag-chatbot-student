@@ -1,0 +1,6 @@
+# Skip Streamlit's first-run email prompt, which would block the terminal
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

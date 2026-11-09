@@ -1,0 +1,10 @@
+# Never copied into the image: rebuildable, private, or not needed to run.
+.venv/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+chroma_db/
+logs/
+tests/
+homework/

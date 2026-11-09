@@ -1,0 +1,18 @@
+LumaBox Customer Policies
+
+Returns
+Case 1, good condition online return: use EMS to send the item back; the customer pays the delivery cost.
+Case 2, defective online return: a messenger will pick up the item within 10 km of the store; otherwise EMS is used and LumaBox pays the delivery cost.
+Case 3, in-store return: visit the store between 8:00 and 17:00.
+
+Delivery
+If a parcel is lost, contact the courier's support first, since delivery is outsourced. If you can't reach them, contact LumaBox technical support instead.
+
+Refund
+LumaBox refunds are processed within 8 business days after the returned product passes inspection.
+
+Technical Support
+Available 24/7, every day.
+
+Account
+To reset a LumaBox password, select Forgot password on the sign-in page.
