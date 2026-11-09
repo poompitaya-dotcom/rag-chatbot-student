@@ -28,6 +28,12 @@ AutoModelForSeq2SeqLM.from_pretrained('google/flan-t5-base')"
 COPY src/ src/
 COPY prompts/ prompts/
 COPY data/ data/
+# The price table is a knowledge source, not homework material: src/ingest.py
+# reads it at build time and hashes it into KB_VERSION. It lives under
+# homework/ because that is where the exercise put it, so it is copied
+# explicitly rather than shipping the whole folder (notes, traffic samples)
+# into the production image.
+COPY homework/model_prices.xlsx homework/
 COPY app.py AGENT_POLICY.md ./
 
 # 4. Build the knowledge base at build time, so every container from this
