@@ -136,6 +136,23 @@ def lexical_score(query, document):
     return max(code_component, word_component)
 
 
+def lexical_precision(query, document):
+    """Share of the *document's* content words the query accounts for.
+
+    Only ever used to break a tie between two documents with the same score.
+    "How much is the LumaBox X300?" matches both "LMX-204 LumaBox X300" and
+    "LMX-205 LumaBox Pro X300" on the code token `x300`, and the vector model
+    slightly prefers the wrong one. The document with less unaccounted-for
+    material - no stray "Pro" - is the closer match to what was asked.
+    """
+    document_tokens = _tokens(document)
+    if not document_tokens:
+        return 0.0
+    query_tokens = _tokens(query)
+    matched = sum(t in query_tokens for t in document_tokens)
+    return matched / len(document_tokens)
+
+
 def retrieve(query, k=2):
     """Return the top-k chunks for a query.
 
@@ -169,10 +186,14 @@ def retrieve(query, k=2):
                 "similarity": max(vector_similarity, LEXICAL_WEIGHT * lexical),
                 "vector_similarity": vector_similarity,
                 "lexical_score": lexical,
+                "lexical_precision": lexical_precision(query, text),
             }
         )
 
-    candidates.sort(key=lambda hit: hit["similarity"], reverse=True)
+    # Precision only breaks ties; it never changes the reported similarity.
+    candidates.sort(
+        key=lambda hit: (hit["similarity"], hit["lexical_precision"]), reverse=True
+    )
     return candidates[:k]
 
 
