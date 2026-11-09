@@ -3,15 +3,15 @@
   "categories": {
     "technical support": {
       "passed": 1,
-      "total": 3
+      "total": 4
     },
     "out of scope": {
       "passed": 8,
       "total": 8
     },
     "returns": {
-      "passed": 3,
-      "total": 6
+      "passed": 4,
+      "total": 8
     },
     "delivery": {
       "passed": 1,
@@ -30,7 +30,7 @@
       "total": 12
     },
     "exchange": {
-      "passed": 1,
+      "passed": 2,
       "total": 3
     },
     "order tracking": {

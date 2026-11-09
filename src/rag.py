@@ -5,6 +5,8 @@ half with a versioned prompt (TODO R3-R4) and the policy check
 (TODO R5-R6). rag_answer() at the bottom wires them together
 and records what the monitoring in Module 5 needs. It's already written.
 """
+import difflib
+import re
 import time
 from pathlib import Path
 
@@ -44,6 +46,96 @@ _client = chromadb.PersistentClient(path=str(DB_PATH))
 _collection = _client.get_collection(COLLECTION_NAME)
 
 
+# ------------------------------------------------- hybrid retrieval
+# Vector search alone has two failure modes the traffic replay exposed
+# (homework Exercise 2):
+#
+#   retrieval miss   "How much does model LMX-201 cost?" retrieves price_1
+#                    (LMX-202) rather than price_0. To an embedding model two
+#                    serial codes one digit apart are nearly identical, and
+#                    the codes carry no meaning of their own to begin with.
+#   wrongly refused  "I forgot my pasword" scores 0.189, under the refusal
+#                    threshold, purely because of one transposed letter.
+#
+# Both are lexical problems, so the fix is a lexical signal next to the vector
+# one: Chroma still proposes the candidates, and they are re-ranked on a
+# blend of the two scores. Re-ranking a candidate pool, rather than scoring
+# the whole collection, is what keeps this affordable as the index grows.
+
+CANDIDATE_POOL = 10          # how many vector hits to re-rank
+LEXICAL_WEIGHT = 0.8         # a perfect lexical match is worth 0.8 similarity
+FUZZY_MIN_LENGTH = 6         # only long tokens are matched approximately
+FUZZY_RATIO = 0.85           # "pasword" vs "password" is 0.93
+
+_TOKEN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "is", "are", "was", "were",
+    "do", "does", "did", "can", "could", "will", "would", "should", "my",
+    "me", "i", "you", "your", "it", "its", "this", "that", "to", "of", "in",
+    "on", "for", "with", "from", "at", "by", "as", "be", "been", "have",
+    "has", "had", "what", "when", "where", "who", "how", "why", "much",
+    "many", "there", "their", "they", "we", "us", "so", "not", "no", "yes",
+    "please", "just", "about", "get", "got",
+}
+
+
+def _tokens(text):
+    """Content words, lowercased. Hyphenated codes stay in one piece."""
+    return [t for t in _TOKEN.findall(text.lower()) if t not in _STOPWORDS]
+
+
+def _is_code(token):
+    """A token containing a digit is a model number or a serial code.
+
+    These are the tokens a customer quotes exactly and the ones the embedding
+    model understands least - "X200" and "X250", or two serial codes one
+    digit apart, are nearly the same vector and mean quite different things.
+    """
+    return any(character.isdigit() for character in token)
+
+
+def _matches(token, document_tokens):
+    if token in document_tokens:
+        return True
+    if len(token) < FUZZY_MIN_LENGTH:
+        return False  # short tokens fuzzy-match far too easily ("pay"/"pays")
+    return bool(difflib.get_close_matches(token, document_tokens, n=1, cutoff=FUZZY_RATIO))
+
+
+def lexical_score(query, document):
+    """How well the query's words appear literally in the document, 0.0-1.0.
+
+    Two independent components, and the better one wins:
+
+    * **code match** - if the query quotes a model number or serial code,
+      does this document contain exactly that code? This is deliberately
+      all-or-nothing: a customer who types "LMX-201" means that product and
+      no other, so a document carrying the code outranks one that merely
+      looks similar in vector space.
+    * **word overlap** - what share of the query's content words appear in
+      the document, allowing an approximate match for long words so that a
+      typo is forgiven. Short words must match exactly, or unrelated queries
+      would accumulate a score on near-misses like "pay"/"pays".
+
+    max() rather than a sum, because the two answer different questions and
+    neither should dilute the other.
+    """
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        return 0.0
+    document_tokens = _tokens(document)
+
+    codes = [t for t in query_tokens if _is_code(t)]
+    code_component = (
+        sum(t in document_tokens for t in codes) / len(codes) if codes else 0.0
+    )
+
+    matched = sum(_matches(t, document_tokens) for t in query_tokens)
+    word_component = matched / len(query_tokens)
+
+    return max(code_component, word_component)
+
+
 def retrieve(query, k=2):
     """Return the top-k chunks for a query.
 
@@ -56,13 +148,32 @@ def retrieve(query, k=2):
     "similarity".
     """
     query_vector = embedding_model.encode(query, normalize_embeddings=True).tolist()
-    results = _collection.query(query_embeddings=[query_vector], n_results=k)
-    return [
-        {"id": doc_id, "text": text, "similarity": 1 - distance}
-        for doc_id, text, distance in zip(
-            results["ids"][0], results["documents"][0], results["distances"][0]
+    results = _collection.query(
+        query_embeddings=[query_vector], n_results=max(k, CANDIDATE_POOL)
+    )
+
+    candidates = []
+    for doc_id, text, distance in zip(
+        results["ids"][0], results["documents"][0], results["distances"][0]
+    ):
+        vector_similarity = 1 - distance
+        lexical = lexical_score(query, text)
+        candidates.append(
+            {
+                "id": doc_id,
+                "text": text,
+                # max(), not a weighted sum: either signal on its own is
+                # enough evidence, and averaging would let a strong lexical
+                # match be diluted by a weak vector score (and vice versa).
+                # Both sub-scores are kept so a trace can say which one fired.
+                "similarity": max(vector_similarity, LEXICAL_WEIGHT * lexical),
+                "vector_similarity": vector_similarity,
+                "lexical_score": lexical,
+            }
         )
-    ]
+
+    candidates.sort(key=lambda hit: hit["similarity"], reverse=True)
+    return candidates[:k]
 
 
 # ------------------------------------------------- Module 2: generation
