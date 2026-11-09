@@ -66,11 +66,12 @@ def retrieve(query, k=2):
 
 
 # ------------------------------------------------- Module 2: generation
-# TODO R3: load the tokenizer and model for GENERATOR_MODEL_NAME
-# (google/flan-t5-base) with transformers' AutoTokenizer and
-# AutoModelForSeq2SeqLM. Move the model to `device` and put it in eval mode.
-tokenizer = ...
-generator = ...
+# R3: the generator. eval() turns off dropout and the like, so the same prompt
+# gives the same answer every time - a precondition for the golden dataset and
+# the quality gate meaning anything.
+tokenizer = AutoTokenizer.from_pretrained(GENERATOR_MODEL_NAME)
+generator = AutoModelForSeq2SeqLM.from_pretrained(GENERATOR_MODEL_NAME).to(device)
+generator.eval()
 
 
 def load_prompt(version):
@@ -79,40 +80,60 @@ def load_prompt(version):
 
 
 def build_prompt(question, context, version=None):
-    """TODO R4: fill the template with the context and the question.
+    """R4: fill the template with the context and the question.
 
-    The template comes from load_prompt(version or PROMPT_VERSION) and has
-    {context} and {question} placeholders.
+    The template is a file in prompts/, never a string literal in here, so
+    that changing the bot's instructions is a reviewable, revertable commit
+    and every trace can name the version that produced it.
     """
-    raise NotImplementedError("TODO R4: fill the prompt template")
+    template = load_prompt(version or PROMPT_VERSION)
+    return template.format(context=context, question=question)
 
 
 def generate_answer(prompt):
-    """TODO R4: run the model on the prompt and return its answer as text.
+    """R4: run the model on the prompt and return its answer as text.
 
-    - tokenize the prompt as PyTorch tensors on `device`, without truncating;
-    - raise ValueError if it's longer than 512 tokens (flan-t5's input limit);
-    - generate greedily (do_sample=False), at most 64 new tokens, inside
-      torch.inference_mode();
-    - decode the output, skipping special tokens.
+    truncation=False on purpose: silently cutting the prompt would drop the
+    end of the retrieved context and produce a confidently wrong answer with
+    nothing in the trace to explain it. Failing loudly makes the 512-token
+    budget a visible engineering constraint on k and chunk size instead.
+
+    do_sample=False makes generation greedy, so the answer is reproducible.
     """
-    raise NotImplementedError("TODO R4: write generate_answer")
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=False).to(device)
+    token_count = inputs["input_ids"].shape[1]
+    if token_count > 512:
+        raise ValueError(
+            f"Prompt is {token_count} tokens, over flan-t5's 512 token budget. "
+            "Reduce k or passage length."
+        )
+    with torch.inference_mode():
+        output = generator.generate(**inputs, max_new_tokens=64, do_sample=False)
+    return tokenizer.decode(output[0], skip_special_tokens=True)
 
 
 # ------------------------------------------------- Module 2: policy
-# TODO R5: choose the threshold from the similarity scores you printed in
-# Module 1, Task 3: below every in-scope question, above the clearly
-# out-of-scope ones.
-SIMILARITY_THRESHOLD = ...
+# R5: chosen from the scores measured in Module 1, Task 3, not guessed.
+#   lowest in-scope question         0.42  ("When will I get my money back?")
+#   highest clearly out-of-scope     0.10  ("Can you recommend a good restaurant?")
+# 0.30 sits roughly in the middle of that gap: it leaves ~0.12 of headroom
+# under the worst fair question, so a reworded one does not get refused, and
+# ~0.20 of margin over unrelated questions. It cannot separate the "tricky"
+# out-of-scope questions, which score 0.42-0.47 because they share vocabulary
+# with the policies - that is the documented gap under P6, not a bad threshold.
+SIMILARITY_THRESHOLD = 0.30
 
 
 def should_refuse(hits):
     """AGENT_POLICY.md P1: refuse when nothing retrieved is relevant enough.
 
-    TODO R6: return True when there are no hits, or when the top hit's
-    similarity is below SIMILARITY_THRESHOLD.
+    R6: refuse when nothing came back at all, or when even the best match is
+    below SIMILARITY_THRESHOLD. This lives in code rather than in the prompt
+    so that a prompt change cannot remove it: Module 2, Task 2 showed prompt
+    v2 happily answering "What's the weather like today?" with "8:00 and
+    17:00" when the only rule was a sentence in the prompt.
     """
-    return False  # placeholder: never refuses, i.e. no policy yet
+    return not hits or hits[0]["similarity"] < SIMILARITY_THRESHOLD
 
 
 # ------------------------------------------------- the agent
