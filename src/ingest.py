@@ -22,37 +22,50 @@ COLLECTION_NAME = "policies"
 # the exact knowledge it came from.
 KB_VERSION = hashlib.sha256(DATA_PATH.read_bytes()).hexdigest()[:12]
 
-# TODO I1: load the embedding model "sentence-transformers/all-MiniLM-L6-v2"
-# with SentenceTransformer, on the CPU (device="cpu").
-embedding_model = ...
+# I1: the embedding model. Pinned by name so the index side (here) and the
+# query side (src/rag.py) always share one vector space; device="cpu" keeps the
+# result reproducible on any machine, including the CI runner.
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
 
 
 def chunk_documents():
     """Split the raw policy text into a list of chunk strings.
 
-    TODO I2: open data/lumabox_policies.txt and look at its shape first. Then
-    return one string per policy:
-      - policies are separated by blank lines
-      - strip surrounding whitespace from each piece
-      - drop the title line at the top of the file (a heading with no body)
+    I2: the file holds one policy per blank-line-separated block, and each
+    block is a heading followed by its body. The file's own title
+    ("LumaBox Customer Policies") is a heading with no body, so after
+    stripping it contains no newline - that is what tells it apart from a
+    real policy chunk.
     """
-    raise NotImplementedError("TODO I2: split the raw text into chunks")
+    text = DATA_PATH.read_text(encoding="utf-8")
+    raw_chunks = [chunk.strip() for chunk in text.split("\n\n")]
+    return [chunk for chunk in raw_chunks if "\n" in chunk]
 
 
 def build_index():
     chunks = chunk_documents()
 
-    # TODO I3: open a persistent Chroma client that stores its files at
-    # DB_PATH, delete any old collection called COLLECTION_NAME (so running
-    # this twice is safe), then create a fresh collection that compares
-    # vectors by cosine distance and records KB_VERSION in its metadata.
-    collection = ...
+    # I3: a persistent client, so the index survives a restart. The old
+    # collection is dropped first, which makes re-running ingest idempotent
+    # instead of additive. KB_VERSION goes into the collection metadata,
+    # which is where src/rag.py reads it from for every trace.
+    client = chromadb.PersistentClient(path=str(DB_PATH))
+    try:
+        client.delete_collection(COLLECTION_NAME)
+    except Exception:
+        pass  # first run: there is no old collection to delete
+    collection = client.create_collection(
+        COLLECTION_NAME,
+        metadata={"hnsw:space": "cosine", "kb_version": KB_VERSION},
+    )
 
-    # TODO I4: embed the chunks (with normalize_embeddings=True) and add them to the
-    # collection with generic ids: chunk_0, chunk_1, ... There's no natural
-    # "returns"/"delivery" label anymore, because the chunks were derived by
-    # splitting, not handed to you pre-labeled.
-    ...
+    # I4: embed with the same normalisation the query side uses, and give the
+    # chunks generic ids - they came from splitting raw text, not from
+    # pre-labelled documents.
+    embeddings = embedding_model.encode(chunks, normalize_embeddings=True).tolist()
+    ids = [f"chunk_{i}" for i in range(len(chunks))]
+    collection.add(ids=ids, documents=chunks, embeddings=embeddings)
 
     print(f"Indexed {len(chunks)} chunks into {DB_PATH} (kb_version {KB_VERSION})")
 

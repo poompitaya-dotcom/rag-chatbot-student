@@ -35,27 +35,34 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 # ------------------------------------------------- Module 1: retrieval
-# TODO R1: load the embedding model (EMBEDDING_MODEL_NAME, on the CPU), then
-# connect to the collection ingest.py built: same path, same name, but get
-# it rather than create it. If it says the collection doesn't exist, run
-# `python -m src.ingest` first.
-embedding_model = ...
-_client = ...
-_collection = ...
+# R1: the same embedding model ingest.py used - a query embedded by a
+# different model would be meaningless in this vector space. The collection is
+# fetched, not created: building it is ingest.py's job, and failing loudly here
+# is better than silently searching an empty index.
+embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device="cpu")
+_client = chromadb.PersistentClient(path=str(DB_PATH))
+_collection = _client.get_collection(COLLECTION_NAME)
 
 
 def retrieve(query, k=2):
     """Return the top-k chunks for a query.
 
-    TODO R2: embed the query the same way the chunks were embedded
-    (embedding_model, normalize_embeddings=True), then ask _collection for
-    the k nearest chunks.
+    R2: the query is embedded exactly as the chunks were, including
+    normalize_embeddings=True. The collection was created with cosine
+    distance, so similarity = 1 - distance. Chroma nests its results one
+    level per query, and we only ever send one.
 
-    Return a list of dicts, best match first, each with "id", "text" and
-    "similarity" keys. Note that Chroma reports *distances*, not
-    similarities.
+    Returns a list of dicts, best match first, each with "id", "text" and
+    "similarity".
     """
-    raise NotImplementedError("TODO R2: query Chroma and shape the results")
+    query_vector = embedding_model.encode(query, normalize_embeddings=True).tolist()
+    results = _collection.query(query_embeddings=[query_vector], n_results=k)
+    return [
+        {"id": doc_id, "text": text, "similarity": 1 - distance}
+        for doc_id, text, distance in zip(
+            results["ids"][0], results["documents"][0], results["distances"][0]
+        )
+    ]
 
 
 # ------------------------------------------------- Module 2: generation
