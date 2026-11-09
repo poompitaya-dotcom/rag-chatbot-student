@@ -8,3 +8,6 @@ chroma_db/
 logs/
 tests/
 homework/
+# ...except the price table, which is a knowledge source the image needs:
+# src/ingest.py reads it at build time and hashes it into KB_VERSION.
+!homework/model_prices.xlsx
